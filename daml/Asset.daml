@@ -1,0 +1,87 @@
+module Asset where
+
+import DA.Action
+import DA.Assert
+import DA.Next.Set
+
+import DA.Finance.Types
+import DA.Finance.Utils
+
+template AssetDepositRequest
+  with
+    account: Text
+    accountType: Text
+    asset: Text 
+    quantity: Decimal
+    operator: Party
+    owner: Party
+    ctrls : Set Party
+  where
+    signatory owner
+    observer ctrls
+
+    controller operator can
+      AcceptReq: ContractId AssetDeposit
+        do
+          create AssetDeposit with ..
+
+
+template AssetDeposit
+  with
+    account: Text
+    accountType: Text
+    asset: Text 
+    quantity: Decimal
+    operator: Party
+    owner: Party
+    ctrls : Set Party
+  where
+    signatory operator,owner
+
+    key (owner, account):(Party, Text)
+    maintainer key._1
+
+    controller owner can
+      AssetDeposit_Split : [ContractId AssetDeposit]
+        with
+          qty: Decimal
+        do
+          assert $ qty <= quantity
+          let remaining = quantity - qty
+          slipCid <- create this with quantity = qty
+          remainingCid <- create this with quantity = remaining
+          return [slipCid, remainingCid]
+      
+      AssetDeposit_Transfer : ContractId TransferRequest
+        with
+          qty: Decimal
+          receiver: Party
+        do
+          assert $ qty <= quantity
+          let remaining = quantity - qty
+          remainingCid <- create this with quantity = remaining
+          create TransferRequest with from = owner; to=receiver, quantity = qty, ..
+
+      
+      AssetSettlement_AddController : ContractId AssetDeposit
+        with
+          ctrl : Party
+        do
+          create this with ctrls = insert ctrl ctrls
+
+
+template TransferRequest
+  with
+    from: Party
+    to: Party
+    account: Text
+    asset: Text 
+    quantity: Decimal
+    operator: Party
+  where 
+    signatory operator, from
+
+    -- controller operator can
+    --   Accept: ContractId AssetDeposit
+    --     do
+    --       create AssetDeposit with owner = to, accountType = "Business",..

@@ -1,0 +1,30 @@
+{-# LANGUAGE NoImplicitPrelude #-}
+
+module ContingentClaims.Observable where
+
+import Prelude (Bool)
+
+-- TODO: type aliases for different Observables e.g. time or decimal, to avoid long type constraints
+
+class TimeF f t where
+  time : f t t
+
+class PointF f t a where
+  pure : a -> f t a
+
+class RingF f t a where
+  zero : f t a
+  one : f t a
+  (+) : f t a -> f t a -> f t a
+  (-) : f t a -> f t a
+  (*) : f t a -> f t a -> f t a
+  (/) : f t a -> f t a -> f t a
+
+class InequalityF f t a where
+  (<=) : f t a -> f t a -> f t Bool
+  (==) : f t a -> f t a -> f t Bool
+
+{-
+class LogicF f where
+  (&&) : f Bool -> f Bool -> f Bool
+-}

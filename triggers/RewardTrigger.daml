@@ -1,0 +1,30 @@
+-- Copyright (c) 2020 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module RewardTrigger where
+
+-- import Daml.Trigger
+-- import DA.Foldable (forA_)
+-- import ShoppingMall 
+
+-- handleSettlementInstruction : Trigger ()
+-- handleSettlementInstruction = Trigger
+--   { initialize = pure ()
+--   , updateState = \_ -> pure ()
+--   , rule = handleSettlementInstructionRule
+--   , registeredTemplates = RegisteredTemplates [ registeredTemplate @SettlementInstruction ]
+--   , heartbeat = None
+--   }
+
+-- -- |Accept all 'SettlementInstruction'
+-- handleSettlementInstructionRule : Party -> TriggerA () ()
+-- handleSettlementInstructionRule party = do
+--   debug "Running Settlement Instruction rule..."
+
+--   -- Accept all 'SettlementInstructions'
+--   settlementInstructions <- query @SettlementInstruction
+
+--   -- TODO: Should call the settlement service instead
+--   forA_ settlementInstructions \(siCid, si) -> do
+--     debug $ "Processing Settlement Instruction: " <> show si
+--     emitCommands [exerciseCmd siCid Settle] [toAnyContractId siCid]

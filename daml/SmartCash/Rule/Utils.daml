@@ -1,0 +1,227 @@
+module SmartCash.Rule.Utils where
+import SmartCash.Rule.Model 
+import Daml.Script
+import SmartCash.Rule.Model 
+import DA.Finance.Asset
+import DA.Finance.Types
+import DA.Finance.Asset.Settlement
+import DA.List (head)
+import SmartCash.Receipt
+
+checkDate: Date -> Date -> Date -> Bool
+checkDate currentDate startDate endDate = (currentDate >= startDate && currentDate <= endDate)
+
+checkQuantity: Decimal -> Decimal -> Bool
+checkQuantity purchasedQty qtyLimit = ( purchasedQty >= qtyLimit)
+
+
+checkAmount: Decimal -> Decimal -> Bool
+checkAmount purchasedAmount amtLimit = (purchasedAmount>= amtLimit)
+
+
+checkMembership: Decimal -> Decimal -> Decimal -> Bool
+checkMembership quantity currentSpend targetSpend = (quantity > targetSpend) || ( quantity + currentSpend > targetSpend) 
+
+checkTime: Int -> Int -> Int -> Bool 
+checkTime currentTime startTime endTime = (currentTime >= startTime && currentTime <= endTime)
+
+
+checkPrice: Reward -> Decimal  -> Decimal -> Decimal -> Decimal 
+checkPrice reward value quantity totalPrice = do
+    -- let 
+    --   totalPrice = quantity * unitPrice
+    case reward of 
+          DISCOUT -> totalPrice *(1.0 - value)
+          MULTIPLY -> (totalPrice / value)
+          FIXED_PX -> (value * quantity)
+          FIXED_CUT -> (totalPrice - value)
+
+handleDATE: Party -> Text -> Date -> Date -> Date -> Reward -> Decimal -> Decimal -> Decimal -> Decimal -- final price
+handleDATE  operator ruleId date startDate endDate reward value quantity totalPrice = do
+  let check = checkDate date startDate endDate
+  if check then (checkPrice reward value quantity totalPrice) else totalPrice
+
+handleONEQTY: Decimal -> Reward -> Decimal -> Decimal -> Decimal ->  Decimal -- final price
+handleONEQTY  quantityLimit reward value quantity totalPrice = do
+  let check = checkQuantity quantity quantityLimit
+  if check then (checkPrice reward value quantity  totalPrice) else totalPrice
+
+handleONEAMOUNT: Decimal -> Decimal -> Reward -> Decimal -> Decimal -> Decimal
+handleONEAMOUNT totalPrice quantityLimit reward value quantity  = do 
+  let check = checkAmount totalPrice quantityLimit
+  if check then (checkPrice reward value quantity  totalPrice) else totalPrice
+
+
+updateMembership: Party -> Party -> Party -> Decimal-> Text -> Decimal -> Update (Grade)
+updateMembership operator provider customer quantityLimit ruleId quantity = 
+  lookupByKey @Membership (provider, customer, ruleId) >>= \case
+    None -> do
+      create Membership with currentSpend = quantity, targetSpend = quantityLimit, grade = NORMAL, ..
+      pure NORMAL
+    Some cid -> do
+      membership@Membership{currentSpend, targetSpend} <- fetch cid
+      let check = checkMembership quantity currentSpend targetSpend
+      if check then do
+        exercise cid CleanExpense with updater = customer, spending = (currentSpend + quantity - targetSpend)
+      else do
+        exercise cid UpdateExpense with updater = customer, spending= quantity
+
+updateAmountMembership: Party -> Party -> Party -> Decimal-> Text -> Decimal -> Update (Grade)
+updateAmountMembership operator provider customer quantityLimit ruleId quantity = 
+  lookupByKey @Membership (provider, customer, ruleId) >>= \case
+    None -> do
+      create Membership with currentSpend = quantity, targetSpend = quantityLimit, grade = NORMAL, ..
+      pure NORMAL
+    Some cid -> do
+      membership@Membership{currentSpend, targetSpend} <- fetch cid
+      let check = checkMembership quantity currentSpend targetSpend
+      if check then do
+        exercise cid CleanExpense with updater = customer, spending = (currentSpend + quantity - targetSpend)
+      else do
+        exercise cid UpdateExpense with updater = customer, spending= quantity
+
+
+handleAccumulate: Party -> Party -> Party -> Text -> RewardRule -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Text -> Update()
+handleAccumulate operator provider customer item rewardRule quantity unitPrice customerDepositCid customerSettlementCid accountId ruleId = do 
+  lookupByKey @Membership (provider, customer, ruleId) >>= \case
+    None -> do
+      handleNormalPayment operator provider customer item quantity unitPrice (quantity*unitPrice) customerDepositCid customerSettlementCid accountId
+      pure()
+    Some cid -> do
+      membership@Membership{currentSpend, targetSpend} <- fetch cid
+      let 
+        check = checkMembership (quantity*unitPrice) currentSpend targetSpend
+      handlePayment operator provider customer item check rewardRule.reward rewardRule.value quantity unitPrice customerDepositCid customerSettlementCid accountId
+      pure()
+
+
+handlePayment: Party -> Party -> Party -> Text -> Bool -> Reward -> Decimal -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+handlePayment operator provider customer item check reward value quantity unitPrice customerDepositCid customerSettlementCid accountId = do
+  if check then do
+    handleRewardPayment operator provider customer item reward value quantity unitPrice customerDepositCid customerSettlementCid accountId 
+  else do
+    handleNormalPayment operator provider customer item quantity unitPrice (quantity*unitPrice) customerDepositCid customerSettlementCid accountId
+
+
+handleRewardPayment: Party -> Party -> Party -> Text -> Reward -> Decimal  -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+handleRewardPayment operator provider customer item reward value quantity unitPrice customerDepositCid customerSettlementCid accountId = do 
+  let 
+    totalPrice = quantity * unitPrice
+    finalPx = case reward of 
+        DISCOUT -> totalPrice *(1.0 - value)
+        MULTIPLY -> (totalPrice / value)
+        FIXED_PX -> (value * quantity)
+        FIXED_CUT -> (totalPrice - value)
+    discount = totalPrice - finalPx
+  timeStamp <- getTime
+  create PurchaseReceipt with ..
+  [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ finalPx ]
+  exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+  
+handleNormalPayment: Party -> Party -> Party -> Text -> Decimal -> Decimal -> Decimal  -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+handleNormalPayment operator provider customer item quantity unitPrice finalPx customerDepositCid customerSettlementCid accountId = do
+  let discount = quantity*unitPrice -  finalPx
+  timeStamp <- getTime
+  create PurchaseReceipt with totalPrice = quantity*unitPrice, ..
+  [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ finalPx ]
+  exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+
+
+upgradeMembership: Party -> Party -> Party -> Text -> Decimal -> Update (MembershipDetail)
+upgradeMembership operator provider customer ruleId totalPrice = do
+  (_, rule@Rule{provider }) <- fetchByKey @Rule (operator, ruleId)
+  (_, r@MembershipRule{membershipDetail }) <- fetchByKey @MembershipRule (operator, ruleId)
+  lookupByKey @Membership (provider, customer, ruleId) >>= \case
+    None -> do
+      let normal  = head $ filter (\details -> details.grade == SmartCash.Rule.Model.NORMAL) membershipDetail
+      create Membership with currentSpend = totalPrice, targetSpend = normal.limit, grade = SmartCash.Rule.Model.NORMAL, ..
+      pure(normal)
+    Some cid -> do
+      membership@Membership{grade, currentSpend, targetSpend} <- fetch cid
+      let currentGrade  = head $ filter (\details -> details.grade == grade) membershipDetail
+      let check = checkMembership totalPrice currentSpend targetSpend
+      if check then do
+        grade <- exercise cid Upgrade with updater = customer, spending = (currentSpend + totalPrice - targetSpend)
+        pure (head $ filter (\details -> details.grade == grade) membershipDetail)
+      else do
+        grade <- exercise cid UpdateExpense with updater = customer, spending= totalPrice
+        pure (head $ filter (\details -> details.grade == grade) membershipDetail)
+
+handleMembershipPayment: Party -> Party -> Party -> Text -> RewardRule -> Text -> Decimal -> Decimal -> MembershipDetail -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update ()
+handleMembershipPayment operator provider customer item rewardRule ruleId quantity unitPrice membershipDetails customerDepositCid customerSettlementCid accountId= do
+  handleRewardPayment operator provider customer item rewardRule.reward membershipDetails.value quantity unitPrice customerDepositCid customerSettlementCid accountId 
+    -- check = checkMembership totalPrice currentSpend targetSpend
+  -- membership@Membership{grade, currentSpend, targetSpend} <- fetch membershipCid
+  -- lookupByKey @Membership (provider, customer, ruleId) >>= \case
+  --   None -> do
+  --     let normal  = head $ filter (\details -> details.grade == SmartCash.Rule.Model.NORMAL) membershipDetail
+  --     handleRewardPayment rewardRule.reward normal.value quantity unitPrice customerDepositCid customerSettlementCid accountId
+  --     -- create Membership with currentSpend = totalPrice, targetSpend = normal.limit, grade = SmartCash.Rule.Model.NORMAL, ..
+  --     pure()
+  --   Some cid -> do
+  --     membership@Membership{grade, currentSpend, targetSpend} <- fetch cid
+  --     let currentGrade  = head $ filter (\details -> details.grade == grade) membershipDetail
+  --     let check = checkMembership totalPrice currentSpend targetSpend
+  --     if check then do
+  --       -- newGrade <- exercise cid Upgrade with updater = customer, spending = (currentSpend + totalPrice - targetSpend)
+  --       let currentGrade  = head $ filter (\details -> details.grade == grade) membershipDetail
+  --       handleRewardPayment rewardRule.reward currentGrade.value quantity unitPrice customerDepositCid customerSettlementCid accountId
+  --     else do
+  --       exercise cid UpdateExpense with updater = customer, spending= totalPrice
+  --       handlePayment check rewardRule.reward currentGrade.value quantity unitPrice customerDepositCid customerSettlementCid accountId
+  --     pure()
+  pure()
+
+handleAndCondition: Party -> Party -> Date -> Text -> Decimal -> Decimal -> Decimal ->  Update (Decimal)
+handleAndCondition operator  customer  date idOfRule quantity unitPrice totalPrice= do 
+  (cid, rule@Rule{rewardRule, provider }) <- fetchByKey @Rule (operator, idOfRule)
+  debug provider
+  let factor = head rewardRule.factor
+  case factor of 
+        MEMBERSHIP -> do
+          membershipDetail <- upgradeMembership operator provider customer idOfRule totalPrice
+          pure $ checkPrice rewardRule.reward membershipDetail.value quantity totalPrice
+        ANY -> do
+          let finalPrice = checkPrice rewardRule.reward rewardRule.value quantity totalPrice
+          pure finalPrice
+        DATE -> do
+          (_, dr@DateRule{startDate, endDate}) <- fetchByKey @DateRule (operator, idOfRule)
+          let finalPrice = handleDATE operator idOfRule date startDate endDate rewardRule.reward rewardRule.value quantity totalPrice
+          pure finalPrice
+        ONE_OFF_QTY -> do
+          debug "call one off qty"
+          (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, idOfRule)
+          let finalPrice = handleONEQTY  quantityLimit rewardRule.reward rewardRule.value quantity totalPrice
+          pure finalPrice
+        ONE_OFF_AMOUNT -> do
+          (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, idOfRule)
+          debug "call one off amount"
+          pure $ handleONEAMOUNT totalPrice quantityLimit rewardRule.reward rewardRule.value quantity
+        ACCUMULATED_QTY -> do
+          (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, idOfRule)
+          updateMembership operator provider customer quantityLimit idOfRule quantity
+          pure(1.0)
+        ACCUMULATED_AMOUNT -> do
+          (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, idOfRule)
+          grade <- updateAmountMembership operator provider customer quantityLimit idOfRule totalPrice
+          pure(totalPrice)
+        TIME -> do
+          pure(1.0)
+
+
+
+
+
+
+
+
+
+
+makePayment: Party -> Party -> Party -> Text -> Decimal -> Decimal -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+makePayment operator provider customer item quantity unitPrice  totalPrice finalPx customerDepositCid customerSettlementCid accountId = do
+  let discount = totalPrice - finalPx
+  timeStamp <- getTime
+  create PurchaseReceipt with totalPrice = (quantity*unitPrice), ..
+  [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ finalPx ]
+  exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+

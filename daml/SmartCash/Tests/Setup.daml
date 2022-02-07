@@ -1,0 +1,158 @@
+module SmartCash.Tests.Setup where
+
+import Daml.Script
+import DA.Next.Set
+import DA.Finance.Asset
+import DA.Finance.Asset.Settlement
+import DA.Finance.Types
+import SmartCash.Operator.Role qualified as Operator
+import SmartCash.Rule.Service  qualified as Rule
+
+data Parties  = Parties
+  with
+    operator: Party
+    alice: Party
+    bob: Party
+    charlie: Party
+    intMerchant1: Party
+    intMerchant2: Party
+    intMerchant3: Party
+    extMerchant1: Party
+    extMerchant2: Party
+    extMerchant3: Party
+    -- bank: Party
+    intmerchant1AccountId: Id
+    intmerchant2AccountId: Id
+    intmerchant3AccountId: Id
+    extmerchant1AccountId: Id
+    extmerchant2AccountId: Id
+    extmerchant3AccountId: Id
+    customer1BankDepositCid: ContractId AssetDeposit
+    -- customer11BankDepositCid: ContractId AssetDeposit
+    customer2BankDepositCid: ContractId AssetDeposit
+    customer3BankDepositCid: ContractId AssetDeposit
+    customer1SettlementCid: ContractId AssetSettlementRule
+    -- customer11SettlementCid: ContractId AssetSettlementRule
+    customer2SettlementCid: ContractId AssetSettlementRule
+    customer3SettlementCid: ContractId AssetSettlementRule
+
+setup : Script Parties
+setup = do
+  let 
+    int1 = "MerchandiseService"
+    int2 = "CreditCardService"
+    int3 = "VoucherService"
+    int4 = "DigitalProductService"
+    ext1 = "Partner1"
+    ext2 = "Partner2"
+    ext3 = "Partner3"
+    ext4 = "Partner4"
+
+
+  operator <- allocatePartyWithHint "PlatformOperator" $ PartyIdHint "PlatformOperator"
+  --Customer
+  alice <- allocatePartyWithHint "Alice" $ PartyIdHint "Alice"
+  bob <- allocatePartyWithHint "Bob" $ PartyIdHint "Bob"
+  charlie <- allocatePartyWithHint "Charlie" $ PartyIdHint "Charlie"
+  --Internal Merchant
+  intMerchant1 <- allocatePartyWithHint int1 $ PartyIdHint int1
+  intMerchant2 <- allocatePartyWithHint int2 $ PartyIdHint int2
+  intMerchant3 <- allocatePartyWithHint int3 $ PartyIdHint int3
+  intMerchant4 <- allocatePartyWithHint int4 $ PartyIdHint int4
+  --External Merchant
+  extMerchant1 <- allocatePartyWithHint ext1 $ PartyIdHint ext1
+  extMerchant2 <- allocatePartyWithHint ext2 $ PartyIdHint ext2
+  extMerchant3 <- allocatePartyWithHint ext3 $ PartyIdHint ext3
+  extMerchant4 <- allocatePartyWithHint ext4 $ PartyIdHint ext4
+
+  submit operator do createCmd Operator.Role with observers = empty, ..
+  let accountName = "@SmartCashAccount"
+
+  let
+    --Asset
+    currencyId         = Id with signatories = fromList [ operator ]; label = "HKD"; version = 0
+    currencyAsset      = Asset with id = currencyId; quantity = 20_000_000.0
+
+    --Account Setup
+    customer1AccountId  = Id with signatories = fromList [ operator ]; label = "Alice" <> accountName; version = 0
+    customer1Account    = Account with id = customer1AccountId; provider = operator; owner = alice
+    customer1Deposit    = AssetDeposit with account = customer1Account; asset = currencyAsset; observers = empty
+    customer1Settlement = AssetSettlementRule with account = customer1Account; observers = empty; ctrls = empty
+
+    -- customer11AccountId  = Id with signatories = fromList [ bank ]; label = "Alice@SmartYenAccount"; version = 0
+    -- customer11Account    = Account with id = customer11AccountId; provider = bank; owner = alice
+    -- customer11Deposit    = AssetDeposit with account = customer11Account; asset = currencyAsset; observers = empty
+    -- customer11Settlement = AssetSettlementRule with account = customer11Account; observers = empty; ctrls = empty
+
+    customer2AccountId  = Id with signatories = fromList [ operator ]; label = "Bob" <> accountName; version = 0
+    customer2Account    = Account with id = customer2AccountId; provider = operator; owner = bob
+    customer2Deposit    = AssetDeposit with account = customer2Account; asset = currencyAsset; observers = empty
+    customer2Settlement = AssetSettlementRule with account = customer2Account; observers = empty; ctrls = empty
+
+    customer3AccountId  = Id with signatories = fromList [ operator ]; label = "Charlie" <> accountName; version = 0
+    customer3Account    = Account with id = customer3AccountId; provider = operator; owner = charlie
+    customer3Deposit    = AssetDeposit with account = customer3Account; asset = currencyAsset; observers = empty
+    customer3Settlement = AssetSettlementRule with account = customer3Account; observers = empty; ctrls = empty
+
+    intmerchant1AccountId  = Id with signatories = fromList [ operator ]; label = int1 <> accountName; version = 0
+    intmerchant1Account    = Account with id = intmerchant1AccountId; provider = operator; owner = intMerchant1
+    intmerchant1Settlement = AssetSettlementRule with account = intmerchant1Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    intmerchant2AccountId  = Id with signatories = fromList [ operator ]; label = int2 <>  accountName; version = 0
+    intmerchant2Account    = Account with id = intmerchant2AccountId; provider = operator; owner = intMerchant2
+    intmerchant2Settlement = AssetSettlementRule with account = intmerchant2Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    intmerchant3AccountId  = Id with signatories = fromList [ operator ]; label = int3 <> accountName; version = 0
+    intmerchant3Account    = Account with id = intmerchant3AccountId; provider = operator; owner = intMerchant3
+    intmerchant3Settlement = AssetSettlementRule with account = intmerchant3Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    intmerchant4AccountId  = Id with signatories = fromList [ operator ]; label = int4 <> accountName; version = 0
+    intmerchant4Account    = Account with id = intmerchant4AccountId; provider = operator; owner = intMerchant4
+    intmerchant4Settlement = AssetSettlementRule with account = intmerchant4Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    extmerchant1AccountId  = Id with signatories = fromList [ operator ]; label = ext1 <> accountName; version = 0
+    extmerchant1Account    = Account with id = extmerchant1AccountId; provider = operator; owner = extMerchant1
+    extmerchant1Settlement = AssetSettlementRule with account = extmerchant1Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    extmerchant2AccountId  = Id with signatories = fromList [ operator ]; label = ext2 <> accountName; version = 0
+    extmerchant2Account    = Account with id = extmerchant2AccountId; provider = operator; owner = extMerchant2
+    extmerchant2Settlement = AssetSettlementRule with account = extmerchant2Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    extmerchant3AccountId  = Id with signatories = fromList [ operator ]; label =  ext3 <> accountName; version = 0
+    extmerchant3Account    = Account with id = extmerchant3AccountId; provider = operator; owner = extMerchant3
+    extmerchant3Settlement = AssetSettlementRule with account = extmerchant3Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+
+    extmerchant4AccountId  = Id with signatories = fromList [ operator ]; label = ext4<> accountName; version = 0
+    extmerchant4Account    = Account with id = extmerchant4AccountId; provider = operator; owner = extMerchant4
+    extmerchant4Settlement = AssetSettlementRule with account = extmerchant4Account; observers = empty; ctrls = fromList [alice, bob, charlie]
+ 
+  customer1SettlementCid  <- submit operator do createCmd customer1Settlement
+  customer2SettlementCid    <- submit operator do createCmd customer2Settlement
+  customer3SettlementCid    <- submit operator do createCmd customer3Settlement
+  -- customer11SettlementCid  <- submit bank do createCmd customer11Settlement
+
+  intmerchant1SettlementCid    <- submit operator do createCmd intmerchant1Settlement
+  intmerchant2SettlementCid    <- submit operator do createCmd intmerchant2Settlement
+  intmerchant3SettlementCid    <- submit operator do createCmd intmerchant3Settlement
+  intmerchant4SettlementCid    <- submit operator do createCmd intmerchant4Settlement
+
+  extmerchant1SettlementCid    <- submit operator do createCmd extmerchant1Settlement
+  extmerchant2SettlementCid    <- submit operator do createCmd extmerchant2Settlement
+  extmerchant3SettlementCid    <- submit operator do createCmd extmerchant3Settlement
+  extmerchant4SettlementCid    <- submit operator do createCmd extmerchant4Settlement
+
+  --deposit
+  let 
+    customer1BankDeposit    = AssetDeposit with account = customer1Account; asset = currencyAsset; observers = empty
+    -- customer11BankDeposit    = AssetDeposit with account = customer11Account; asset = currencyAsset; observers = empty
+    customer2BankDeposit    = AssetDeposit with account = customer2Account; asset = currencyAsset; observers = empty
+    customer3BankDeposit    = AssetDeposit with account = customer3Account; asset = currencyAsset; observers = empty
+  
+  customer1BankDepositCid <- submit operator do createCmd customer1BankDeposit
+  -- customer11BankDepositCid <- submit bank do createCmd customer11BankDeposit
+  customer2BankDepositCid <- submit operator do createCmd customer2BankDeposit
+  customer3BankDepositCid <- submit operator do createCmd customer3BankDeposit
+
+  -- create rule service for Operator
+  submit operator do createCmd Rule.Service with provider = operator; observers = fromList [intMerchant1, intMerchant2,intMerchant3, intMerchant4, extMerchant1, extMerchant2, extMerchant3, extMerchant4, alice, bob, charlie ], ..
+  pure Parties with ..

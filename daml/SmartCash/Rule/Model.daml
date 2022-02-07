@@ -1,0 +1,207 @@
+module SmartCash.Rule.Model where
+
+import DA.Date
+import DA.Next.Set
+import DA.List (head)
+
+data Grade = 
+    GOLD
+    | SILVER
+    | BRONZE
+    | NORMAL
+  deriving(Eq, Show)
+
+data MembershipDetail = MembershipDetail with
+    grade: Grade
+    limit: Decimal
+    value: Decimal 
+  deriving(Eq, Show)
+
+data Factor = 
+  DATE 
+  |TIME 
+  | ACCUMULATED_QTY
+  | ONE_OFF_QTY 
+  |ACCUMULATED_AMOUNT 
+  |ONE_OFF_AMOUNT 
+  | MEMBERSHIP
+  | ANY
+  deriving(Eq, Show)
+
+data Reward =
+  DISCOUT 
+  | MULTIPLY 
+  -- | VOUCHER -- T.B.F
+  | FIXED_PX 
+  | FIXED_CUT 
+  -- | FREE 
+  deriving(Eq, Show)
+
+-- data Type =
+--   ONE
+--   -- | MANY
+--   deriving(Eq, Show)
+
+data RewardRule = RewardRule with
+    -- ruleType: Type
+    factor: [Factor]
+    reward: Reward
+    value: Decimal
+  deriving(Eq, Show)
+
+
+template Rule
+  with
+    operator: Party
+    provider: Party
+    observers: Set Party
+    ruleId: Text
+    rewardRule: RewardRule
+  where
+    signatory operator, provider
+    observer observers
+    key (operator , ruleId): (Party, Text)
+    maintainer key._1
+
+
+template DateRule
+  with
+    operator: Party
+    provider: Party
+    observers: Set Party
+    ruleId: Text
+    startDate: Date
+    endDate: Date
+  where
+    signatory operator, provider
+    observer observers
+    key (operator , ruleId): (Party, Text)
+    maintainer key._1
+
+template TimeRule
+  with
+    operator: Party
+    provider: Party
+    observers: Set Party
+    ruleId: Text
+    startTime: Int
+    endTime: Int
+  where
+    signatory operator, provider
+    observer observers
+    key (operator , ruleId): (Party, Text)
+    maintainer key._1
+
+template QuantityRule
+  with
+    operator: Party
+    provider: Party
+    observers: Set Party
+    ruleId: Text
+    quantityLimit: Decimal
+  where
+    signatory operator, provider
+    observer observers
+    key (operator , ruleId): (Party, Text)
+    maintainer key._1
+
+
+template MembershipRule
+  with
+    operator: Party
+    provider: Party
+    observers: Set Party
+    ruleId: Text
+    membershipDetail : [MembershipDetail]
+  where
+    signatory operator, provider
+    observer observers
+    key (operator , ruleId): (Party, Text)
+    maintainer key._1
+
+
+
+template Membership
+  with
+    operator: Party
+    grade: Grade
+    provider: Party
+    customer: Party
+    ruleId: Text
+    currentSpend: Decimal
+    targetSpend: Decimal
+  where 
+    signatory provider, customer
+    key (provider, customer, ruleId):(Party, Party, Text)
+    maintainer key._1
+
+    choice UpdateExpense: Grade
+      with
+        updater: Party
+        spending: Decimal
+      controller updater
+        do 
+          create this with currentSpend = (currentSpend + spending)
+          return grade
+    
+    choice CleanExpense: Grade
+      with
+        updater: Party
+        spending: Decimal
+      controller updater
+        do 
+          create this with currentSpend = spending
+          return grade
+    
+    choice Upgrade: Grade
+      with
+        updater: Party
+        spending: Decimal
+      controller updater
+        do 
+          let newGrade = case grade of 
+                BRONZE -> SILVER
+                SILVER -> GOLD
+                GOLD -> GOLD
+                NORMAL -> BRONZE
+          (_, mr@MembershipRule{membershipDetail}) <- fetchByKey @MembershipRule (operator, ruleId)
+          let md  = head $ Prelude.filter (\details -> details.grade == newGrade) membershipDetail
+          create this with currentSpend = spending, grade = newGrade, targetSpend = md.limit
+          return newGrade
+    
+
+
+-- data Reward = 
+--   DISCOUNT
+--   | MULTIPLY
+--   | CASH_BACK
+--   | VOUCHER:text code
+--   | FIXED_PX : price
+--   | FREE: product
+
+-- --level 1 rule
+-- when date/time >> DISCOUNT
+-- when date/time >> MULTIPLY
+-- when date/time >> VOUCHER
+-- when date/time >> FIXED_PX
+-- Any >> DISCOUNT 
+-- Any >> MULTIPLY 
+-- Any >> VOUCHER 
+-- Any >> FIXED_PX 
+-- Any >> FREE 
+-- ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> DISCOUNT
+-- ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT>> MULTIPLY
+-- ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> CASH_BACK
+-- ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT>> VOUCHER
+-- ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> FREE:product
+
+-- --lvel 2 rue
+-- when date/time >> ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> DISCOUNT
+-- when date/time >> ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT>> MULTIPLY
+-- when date/time >> ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> CASH_BACK
+-- when date/time >> ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT>> VOUCHER
+-- when date/time >> ONE_OFF_QTY/ONE_OFF_AMOUNTACCUMULATED_QTY/ACCUMULATED_AMOUNT >> FREE:product
+
+-- product can apply multple rules (OR / AND condiction)
+-- ACCUMULATED_QTY: product/any or ACCUMULATED_AMOUNT: product/any >> DISCOUNT/MULTIPLY/CASH_BACK/VOUCHER/FREE:product
+

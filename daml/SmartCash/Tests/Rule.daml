@@ -1,0 +1,31 @@
+module SmartCash.Tests.Rule where
+
+
+import Daml.Script
+import SmartCash.Tests.Setup (setup, Parties(..))
+
+import SmartCash.Rule.Model 
+import DA.Date (date, Month(Jan, Oct))
+import SmartCash.Utils
+
+test: Script ()
+test = do
+  parties <- setup
+  -- ruleTest parties
+
+  pure()
+
+-- ruleTest : Parties  -> Script ()
+-- ruleTest Parties{..}  = do
+--   let
+--     rewardRule1 = RewardRule with ruleType = ONE, factor = [DATE], reward = FIXED_PX, value = 100.0
+--     rewardRule2 = RewardRule with ruleType = ONE, factor = [ANY], reward= DISCOUT,  value = 0.1
+
+  
+  -- createRule operator operator "Rule001" rewardRule1 (Some (date 2022 Oct 22)) (Some( date 2022 Oct 22))
+  -- createRule operator operator "Rule002" rewardRule2 None None
+ 
+
+
+
+  pure()

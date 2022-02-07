@@ -1,0 +1,33 @@
+module SmartCash.Operator.Role where
+
+import DA.Next.Set
+import SmartCash.InternalMerchant.Service qualified as InternalMerchant
+import SmartCash.ExternalMerchant.Service qualified as ExternalMerchant
+
+template Role
+  with
+    operator : Party
+    observers : Set Party
+  where
+    signatory operator
+    observer observers
+
+    key operator : Party
+    maintainer key
+
+    controller operator can
+      nonconsuming OfferInternalMerchantService : ContractId InternalMerchant.Offer
+        with
+          provider : Party
+          customer: Party
+        do
+          create InternalMerchant.Offer with ..
+
+      nonconsuming OfferExternalMerchantService : ContractId ExternalMerchant.Offer
+        with
+          provider : Party
+          customer: Party
+        do
+          create ExternalMerchant.Offer with ..
+
+

@@ -1,0 +1,86 @@
+module ContingentClaims.Test.FinancialContract where
+
+import ContingentClaims.Claim.Serializable (Claim)
+import ContingentClaims.Claim (deserialize, serialize, executorOf)
+import DA.Next.Set qualified as Set
+import DA.Date
+import ContingentClaims.Test.Currency
+import ContingentClaims.Lifecycle (lifecycle, pruneLeaf, pruneOr)
+
+type T = FinancialContract
+type Days = Int
+type ISIN = Text
+type Asset = Either Currency ISIN
+type Claims = Claim Date Asset
+
+template Quote
+  with
+    isin: ISIN
+    quoteDate: Date
+    close: Decimal
+    source: Party
+  where
+    signatory source
+    key (isin, quoteDate, source) : (ISIN, Date, Party)
+    maintainer key._3
+
+template FinancialContract
+  with
+    bearer: Party
+    counterparty: Party
+    obligations: Claim Date Asset
+  where
+    signatory Set.fromList [bearer, counterparty]
+
+    let obligations = deserialize this.obligations
+        executor = executorOf bearer counterparty obligations
+
+    -- Create dummy contracts to settle 'current' obligations
+    nonconsuming choice Clear : [ContractId ProposeSettlement]
+      controller executor
+        do t <- toDateUTC <$> getTime
+           let createPending asset quantity tradeDate = create ProposeSettlement
+                 with
+                   payer = counterparty --FIXME: this breaks with a Give Node
+                   receiver = bearer
+                   asset
+                   quantity
+                   tradeDate
+               getSpotRate isin t = do
+                 (_, Quote{close}) <- fetchByKey (isin, t, bearer) -- FIXME: maintainer should be the market data provider
+                 pure close
+               elect = const -- always branch left
+           lifecycle createPending getSpotRate elect obligations t
+
+    choice Elect: ContractId FinancialContract -- FIXME: evaluate `When` to only only allow pruning at right time.
+       with election: Claim Date Asset
+      controller executor
+        do create this with obligations = serialize $ pruneOr (deserialize election) obligations
+
+-- Dummy contract to propose settlement
+template ProposeSettlement
+  with
+    payer: Party
+    receiver: Party
+    quantity: Decimal
+    asset: Asset
+    tradeDate : Date
+  where
+    signatory Set.fromList [payer, receiver]
+
+    controller receiver can
+      Confirm : ContractId FinancialContract
+        with
+          cid: ContractId FinancialContract
+        do let getSpotRate isin t = do
+                 (_, Quote{close}) <- fetchByKey (isin, t, payer) -- FIXME: maintainer should be the market data provider
+                 pure close
+           contract <- fetch cid
+           obl <- pruneLeaf getSpotRate asset quantity (deserialize contract.obligations) tradeDate
+           let obl' = serialize obl
+           if obl' == contract.obligations
+             then fail "ProposeSettlement.Confirm: No matching obligation"
+             else do
+               cid' <- create contract with obligations = obl'
+               archive cid
+               return cid'

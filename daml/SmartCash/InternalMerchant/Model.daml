@@ -1,0 +1,263 @@
+module SmartCash.InternalMerchant.Model where
+
+import DA.Next.Set (Set)
+import DA.Finance.Asset.Settlement
+import DA.Finance.Asset
+import DA.Finance.Types
+import DA.List (head, last)
+import SmartCash.Rule.Model 
+import SmartCash.Rule.Utils
+
+-- data Category = 
+--   GOLD 
+--   | SILVER 
+--   | BRONZE 
+--   | IRON 
+--   deriving(Eq, Show)
+
+data Condition =
+  AND
+  | OR
+  | NONE
+   deriving(Eq, Show)
+
+
+template Product
+  with
+    accountId: Id
+    operator: Party
+    provider: Party
+    observers: Set Party
+    productId: Text
+    item: Text
+    unitPrice: Decimal
+    ruleIds: [Text]
+    condition: Condition
+  where 
+    signatory operator, provider
+    observer observers
+    key (provider, productId):(Party, Text)
+    maintainer key._1
+
+    nonconsuming choice Purchase: () -- (ContractId PurchaseReceipt, ContractId AssetDeposit)
+      with
+        customer: Party
+        quantity: Decimal
+        customerDepositCid: ContractId AssetDeposit
+        customerSettlementCid: ContractId AssetSettlementRule
+        date: Date
+        time: Int
+      controller customer
+        do
+          let totalPrice = quantity*unitPrice
+          if (length ruleIds) == 1 then do
+            let ruleId = head ruleIds
+            (cid, rule@Rule{rewardRule}) <- fetchByKey @Rule (operator, ruleId)
+            -- case (rewardRule.ruleType) of
+            --  ONE -> do
+            let factor = head rewardRule.factor
+            case factor of
+              DATE -> do
+                (_, dr@DateRule{startDate, endDate}) <- fetchByKey @DateRule (operator, ruleId)
+                let finalPrice =                 handleDATE operator ruleId date startDate endDate rewardRule.reward rewardRule.value quantity totalPrice
+                -- let check = checkDate date startDate endDate
+                handleNormalPayment operator provider customer item quantity unitPrice finalPrice customerDepositCid customerSettlementCid accountId
+                pure()
+
+              ONE_OFF_QTY -> do
+                (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, ruleId)
+                -- let check = checkQuantity quantity quantityLimit
+                -- ,handlePayment check rewardRule.reward rewardRule.value  quantity unitPrice customerDepositCid customerSettlementCid accountId
+                let finalPrice = handleONEQTY quantityLimit rewardRule.reward rewardRule.value quantity totalPrice
+                let check = checkQuantity quantity quantityLimit
+                debug "finalPrice"
+                debug (check, quantityLimit, quantity, unitPrice)
+                handleNormalPayment operator provider customer item quantity unitPrice finalPrice customerDepositCid customerSettlementCid accountId
+                pure()
+
+              ONE_OFF_AMOUNT -> do
+                (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, ruleId)
+                --let check = checkAmount totalPrice quantityLimit
+                let finalPrice =  handleONEAMOUNT totalPrice quantityLimit rewardRule.reward rewardRule.value quantity  
+                handleNormalPayment operator provider customer item quantity unitPrice finalPrice customerDepositCid customerSettlementCid accountId
+                pure()
+
+              ACCUMULATED_QTY -> do
+                (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, ruleId)
+                updateMembership operator provider customer quantityLimit ruleId quantity
+                handleAccumulate operator provider customer item rewardRule quantity unitPrice customerDepositCid customerSettlementCid accountId ruleId
+          
+
+              ACCUMULATED_AMOUNT -> do
+                (_, r@QuantityRule{quantityLimit}) <- fetchByKey @QuantityRule (operator, ruleId)
+                updateMembership operator provider customer quantityLimit ruleId totalPrice 
+                handleAccumulate operator provider customer item rewardRule quantity unitPrice customerDepositCid customerSettlementCid accountId ruleId
+          
+              
+              TIME -> do
+                (_, r@TimeRule{startTime,endTime }) <- fetchByKey @TimeRule (operator, ruleId)
+                let check = checkTime time startTime endTime
+                handlePayment operator provider customer item check rewardRule.reward rewardRule.value quantity unitPrice customerDepositCid customerSettlementCid accountId
+                pure()
+              
+              MEMBERSHIP -> do
+                membershipDetails <- upgradeMembership operator provider customer ruleId totalPrice
+                handleMembershipPayment operator provider customer item rewardRule ruleId quantity unitPrice membershipDetails customerDepositCid customerSettlementCid accountId
+                pure()
+
+              ANY -> do
+                handleRewardPayment operator provider customer item rewardRule.reward rewardRule.value quantity unitPrice customerDepositCid customerSettlementCid accountId 
+                pure()
+            else do
+              let 
+                ruleId1 = head ruleIds
+                ruleId2 = last ruleIds
+              debug ruleId1
+              debug ruleId2
+              -- debug totalPrice
+              price1 <- handleAndCondition operator customer  date ruleId1 quantity unitPrice totalPrice
+              debug price1
+              price2 <- handleAndCondition operator customer  date ruleId2 quantity unitPrice price1
+              -- debug price2
+              makePayment operator provider customer item quantity unitPrice totalPrice price2 customerDepositCid customerSettlementCid accountId
+              pure()
+          
+
+
+
+          -- -- let 
+          --   finalPrice = case rewardRule.reward of 
+          --       DISCOUT -> totalPrice
+          --       MULTIPLY -> (totalPrice / rewardRule.value)
+          --       FIXED_PX -> rewardRule.value
+          --       FIXED_CUT -> (totalPrice - rewardRule.value)
+
+          -- value <- case (rewardRule.ruleType) of
+          --   ONE ->  return (handleOneRewardRule rewardRule totalPrice)
+
+
+            -- MANY -> handleManyRewardRule rewardRule totalPrice
+
+
+        
+          -- let 
+          --   a  = head $ filter (\rate -> rate.category == category) spendingPower
+          --   finalCharge = totalPrice / a.power
+          --   discount = totalPrice - finalCharge
+          -- timeStamp <- getTime
+          -- [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ finalCharge ]
+          -- -- purchaseRecordCid <- create PurchaseRecord with ..
+          -- purchaseReceiptCid <- create PurchaseReceipt with ..
+          -- exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+          -- return (purchaseReceiptCid, remainderDepositCid)
+
+
+          -- -- let finalCharge = 
+          -- timeStamp <- getTime
+          -- [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ totalPrice ]
+          -- purchaseRecordCid <- create PurchaseRecord with ..
+          -- purchaseReceiptCid <- create PurchaseReceipt with ..
+          -- exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+          -- return (purchaseRecordCid, remainderDepositCid)
+
+-- handleOneRewardRule: RewardRule -> Decimal -> Date -> Time ->  Decimal
+-- handleOneRewardRule rewardRule totalPrice date time = do
+--   let criteria = head rewardRule.criteria
+--   case (criteria.factor) of
+--         ANY -> handleRewardType rewardRule totalPrice
+--         DATE -> do
+--           if (checkDate criteria date) then do
+--           handleRewardType rewardRule totalPrice
+--           else  handleRewardType rewardRule totalPrice
+
+       
+
+
+-- checkDate: Date -> Date -> Date -> Bool
+-- checkDate currentDate startDate endDate = (currentDate >= startDate && currentDate <= endDate)
+
+-- checkQuantity: Decimal -> Decimal -> Bool
+-- checkQuantity purchasedQty qtyLimit = (purchasedQty>= qtyLimit)
+
+-- checkAmount: Decimal -> Decimal -> Bool
+-- checkAmount purchasedAmount amtLimit = (purchasedAmount>= amtLimit)
+
+-- !! To be fix
+-- checkTime: Int -> Int -> Int -> Bool 
+-- checkTime currentTime startTime endTime = (currentTime >= startTime && currentTime <= endTime)
+
+-- checkMembership: Decimal -> Decimal -> Decimal -> Bool
+-- checkMembership quantity currentSpend targetSpend = (quantity > targetSpend) || ( quantity + currentSpend > targetSpend) 
+
+
+-- handlePayment: Bool -> Reward -> Decimal -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+-- handlePayment check reward value quantity unitPrice customerDepositCid customerSettlementCid accountId= do
+--   if check then do
+--     handleRewardPayment reward value quantity unitPrice customerDepositCid customerSettlementCid accountId
+--   else do
+--     handleNormalPayment (quantity*unitPrice) customerDepositCid customerSettlementCid accountId
+
+-- handleRewardPayment:  Reward -> Decimal  -> Decimal -> Decimal -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+-- handleRewardPayment reward value quantity unitPrice customerDepositCid customerSettlementCid accountId= do 
+--   let 
+--     totalPrice = quantity * unitPrice
+--     finalPx = case reward of 
+--         DISCOUT -> totalPrice *(1.0 - value)
+--         MULTIPLY -> (totalPrice / value)
+--         FIXED_PX -> (value * quantity)
+--         FIXED_CUT -> (totalPrice - value)
+--   [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ finalPx ]
+--   exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+
+-- handleNormalPayment:  Decimal  -> ContractId AssetDeposit ->  ContractId AssetSettlementRule -> Id -> Update(ContractId AssetDeposit)
+-- handleNormalPayment  totalPrice customerDepositCid customerSettlementCid accountId= do 
+--   [ exactDepositCid, remainderDepositCid ] <- exercise customerDepositCid AssetDeposit_Split with quantities = [ totalPrice ]
+--   exercise customerSettlementCid AssetSettlement_Transfer with receiverAccountId = accountId; depositCid = exactDepositCid
+
+
+
+
+
+-- template PurchaseRecord
+--   with
+--     operator: Party
+--     provider: Party
+--     customer: Party
+--     item: Text
+--     quantity: Decimal
+--     unitPrice: Decimal
+--     category: Category
+--     totalPrice: Decimal
+--     timeStamp: Time
+--   where
+--     signatory operator, customer, provider
+
+
+
+
+-- data SpendingPower = SpendingPower with
+--     category: Category
+--     power: Decimal 
+--   deriving(Eq, Show)
+
+
+-- template Rule
+--   with
+--     operator: Party
+--     provider: Party
+--     customer: Party
+--     observers: Set Party
+--     ruleId: Text
+--     spendingPower: [SpendingPower]
+--   where
+--     signatory operator, provider, customer
+--     observer observers
+--     key (customer , ruleId): (Party, Text)
+--     maintainer key._1
+
+--     controller operator can
+--       UpdateRule: ContractId Rule
+--         with
+--           newRates: [SpendingPower]
+--         do
+--           create this with spendingPower = newRates

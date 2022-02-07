@@ -1,0 +1,232 @@
+module Marketplace.Trading.Service where
+
+import DA.Finance.Asset (AssetDeposit)
+import DA.Finance.Types (Account)
+import DA.Finance.Utils (fetchAndArchive)
+import Marketplace.Trading.Model qualified as Order
+import Marketplace.Trading.Confirmation.Model qualified as Confirmation
+import Marketplace.Trading.Error (Error (..))
+import qualified Marketplace.Rule.AllocationAccount as AllocationAccountRule (T, Deposit(..), Withdraw(..))
+
+type T = Service
+
+template Service
+  with
+    operator : Party
+    provider : Party
+    customer : Party
+    tradingAccount : Account
+    allocationAccount : Account
+  where
+    signatory operator, provider, customer
+
+    key (operator, provider, customer) : (Party, Party, Party)
+    maintainer key._1
+
+    controller customer can
+      nonconsuming RequestCreateOrder : (ContractId Order.T, ContractId CreateOrderRequest, ContractId AssetDeposit)
+        with
+          details : Order.Details
+          depositCid : ContractId AssetDeposit
+          observers : [Party]
+        do
+          -- TODO: Check that price and quantity conform to the precision requirements of the Listing
+          -- TODO: Check order valid for exberry with the market/limit and timeInForce combos (also, if GTD if expiry date is less than one year)
+          let
+            status = Order.New
+            providerOrderId = None
+            executions = []
+            remainingQuantity = details.asset.quantity
+
+          depositCid <- exerciseByKey @AllocationAccountRule.T allocationAccount.id AllocationAccountRule.Deposit with ..
+          createOrderRequestCid <- create CreateOrderRequest with ..
+          orderCid <- create Order.Order with ..
+
+          return (orderCid, createOrderRequestCid, depositCid)
+
+      nonconsuming RequestCancelOrder : (ContractId Order.T, ContractId CancelOrderRequest)
+        with
+          orderCid : ContractId Order.T
+        do
+          order@Order.Order{..} <- fetchAndArchive orderCid
+
+          orderCid <- create order with status = Order.PendingCancellation
+          cancelOrderRequestCid <- create CancelOrderRequest with ..
+
+          return (orderCid, cancelOrderRequestCid)
+
+    controller provider can
+      nonconsuming AcknowledgeOrderRequest : ContractId Order.T
+        with
+          createOrderRequestCid : ContractId CreateOrderRequest
+          providerOrderId : Text
+        do
+          CreateOrderRequest{..} <- fetchAndArchive createOrderRequestCid
+          (orderCid, order) <- fetchByKey (provider, details.id.label)
+
+          -- TODO: Confirm what to do with this business ACK when received out of the expected order.
+          --  Should we set the providerOrderId but leave the status as is ? Should we check if this value is already set ? What to do if it's already set ? etc.
+          case order.status of
+            Order.New -> do
+              archive orderCid
+              create order with status = Order.PendingExecution; providerOrderId = Some providerOrderId
+            _ -> return orderCid
+
+      nonconsuming RejectOrder : (ContractId Order.T, ContractId AssetDeposit)
+        with
+          createOrderRequestCid : ContractId CreateOrderRequest
+          errorCode : Int
+          errorMessage : Text
+        do
+          CreateOrderRequest{..} <- fetchAndArchive createOrderRequestCid
+          (orderCid, order) <- fetchByKey (provider, details.id.label)
+          archive orderCid
+
+          let reason = Error with code = show errorCode; message = errorMessage
+          orderCid <- create order with status = Order.Rejected with reason
+          depositCid <- exerciseByKey @AllocationAccountRule.T allocationAccount.id AllocationAccountRule.Withdraw with transferTo = tradingAccount, ..
+
+          return (orderCid, depositCid)
+
+      nonconsuming CancelOrder : (ContractId Order.T, ContractId AssetDeposit)
+        with
+          cancelOrderRequestCid : ContractId CancelOrderRequest
+        do
+          CancelOrderRequest{..} <- fetchAndArchive cancelOrderRequestCid
+          (orderCid, order@Order.Order{..}) <- fetchByKey (provider, details.id.label)
+          archive orderCid
+
+          orderCid <- create order with status = Order.Cancelled
+          depositCid <- exerciseByKey @AllocationAccountRule.T allocationAccount.id AllocationAccountRule.Withdraw with transferTo = tradingAccount, ..
+
+          return (orderCid, depositCid)
+
+      nonconsuming RejectCancellation : ContractId Order.T
+        with
+          cancelOrderRequestCid : ContractId CancelOrderRequest
+          errorCode : Int
+          errorMessage : Text
+        do
+          CancelOrderRequest{..} <- fetchAndArchive cancelOrderRequestCid
+          (orderCid, order) <- fetchByKey (provider, details.id.label)
+          archive orderCid
+
+          let reason = Error with code = show errorCode; message = errorMessage
+          create order with status = Order.CancellationRejected with reason
+
+    controller operator, provider can
+      nonconsuming SignConfirmation : ContractId Confirmation.T
+        with
+          confirmationCid : ContractId Confirmation.T
+        do
+          exercise confirmationCid Confirmation.Sign with ctrl = customer, ..
+
+    choice Terminate : ()
+      with
+        ctrl : Party
+      controller ctrl
+      do pure ()
+
+template Offer
+  with
+    operator : Party
+    provider : Party
+    customer : Party
+  where
+    signatory operator, provider
+
+    controller customer can
+      Accept : ContractId Service
+        with
+          tradingAccount : Account
+          allocationAccount : Account
+        do
+          -- TODO: Check necessary conditions, ie. both are visibe to the provider and provider is nominee on allocationAccount
+          create Service with ..
+
+      Decline : ()
+        do
+          return ()
+
+    controller provider can
+      Withdraw : ()
+        do pure ()
+
+template Request
+  with
+    customer : Party
+    provider : Party
+    tradingAccount : Account
+    allocationAccount : Account
+  where
+    signatory customer
+
+    controller customer can
+      Cancel : ()
+        do pure ()
+
+    controller provider can
+      Reject : ()
+        do pure ()
+
+    choice Approve : ContractId Service
+      with
+        operator : Party
+      controller operator, provider
+      do
+        create Service with ..
+
+template CreateOrderRequest
+  with
+    provider : Party
+    customer : Party
+    operator : Party
+    details : Order.Details
+    depositCid : ContractId AssetDeposit
+  where
+    signatory provider, customer
+
+    key (provider, details.id.label) : (Party, Text)
+    maintainer key._1
+
+    let serviceKey = (operator, provider, customer)
+
+    controller provider can
+      nonconsuming AcknowledgeRequest : ContractId Order.T
+        with
+          providerOrderId : Text
+        do
+          exerciseByKey @Service serviceKey AcknowledgeOrderRequest with createOrderRequestCid = self, ..
+
+      nonconsuming RejectRequest : (ContractId Order.T, ContractId AssetDeposit)
+        with
+          errorCode : Int
+          errorMessage : Text
+        do
+          exerciseByKey @Service serviceKey RejectOrder with createOrderRequestCid = self, ..
+
+template CancelOrderRequest
+  with
+    provider : Party
+    customer : Party
+    operator : Party
+    details : Order.Details
+  where
+    signatory provider, customer
+
+    key (provider, details.id.label) : (Party, Text)
+    maintainer key._1
+
+    let serviceKey = (operator, provider, customer)
+
+    controller provider can
+      nonconsuming AcknowledgeCancel : (ContractId Order.T, ContractId AssetDeposit)
+        do
+          exerciseByKey @Service serviceKey CancelOrder with cancelOrderRequestCid = self
+
+      nonconsuming FailureCancel : ContractId Order.T
+        with
+          errorCode : Int
+          errorMessage : Text
+        do
+          exerciseByKey @Service serviceKey RejectCancellation with cancelOrderRequestCid = self, ..

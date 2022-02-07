@@ -1,0 +1,18 @@
+module SmartCash.Receipt where
+
+
+
+template PurchaseReceipt
+  with
+    operator: Party
+    provider: Party
+    customer: Party
+    item: Text
+    quantity: Decimal
+    unitPrice: Decimal
+    totalPrice: Decimal
+    finalPx: Decimal
+    discount: Decimal
+    timeStamp: Time
+  where
+    signatory operator, provider, customer

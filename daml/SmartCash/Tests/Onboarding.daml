@@ -1,0 +1,85 @@
+module SmartCash.Tests.Onboarding where
+
+-- import Daml.Script
+-- import SmartCash.Tests.Setup (setup, Parties(..))
+-- import SmartCash.Utils
+-- import SmartCash.InternalMerchant.Service qualified as InternalMerchant
+-- import SmartCash.InternalMerchant.Model (SpendingPower(..), Category(..), Purchase(..))
+-- import SmartCash.ExternalMerchant.Model  qualified as ExternalMerchant
+
+
+-- test: Script ()
+-- test = do
+--   parties <- setup
+--   intOnboarding parties
+--   extOnboarding parties
+--   pure()
+
+-- intOnboarding : Parties  -> Script ()
+-- intOnboarding Parties{..}  = do
+
+--   intMerchant1Service <- onboardIntMerchant operator operator intMerchant1 intmerchant1AccountId [alice, bob, charlie] 
+--   intMerchant2Service <- onboardIntMerchant operator operator intMerchant2 intmerchant2AccountId [alice, bob, charlie] 
+--   intMerchant3Service <- onboardIntMerchant operator operator intMerchant3 intmerchant3AccountId [alice, bob, charlie] 
+
+
+--   let 
+--     gold = SpendingPower with category= GOLD  ; power =1.25
+--     silver = SpendingPower with category= SILVER ; power =1.10
+--     bronze = SpendingPower with category= BRONZE ; power =1.05
+--     iron = SpendingPower with category= IRON ; power =1.00
+
+--   --Internal Spending Rule
+--   -- createSpendingRule operator operator intMerchant1 "intMerchant1-001" [alice, bob, charlie] [gold, silver, bronze, iron] 
+--   -- createSpendingRule operator operator intMerchant2 "intMerchant2-001" [alice, bob, charlie] [gold, silver, bronze, iron]
+--   -- createSpendingRule operator operator intMerchant3 "intMerchant3-001" [alice, bob, charlie] [gold, silver, bronze, iron] 
+
+--   --Internal Product List
+--   -- product1Cid <- createInternalProduct operator operator intMerchant1 "intMerchant1-001" "product001" "Pet Insurance" 1250.00 [alice, bob, charlie] GOLD
+--   -- product2Cid <- createInternalProduct operator operator intMerchant1 "intMerchant1-001" "product002" "Delux Life Insurance" 11000.00 [alice, bob, charlie] SILVER
+--   -- product3Cid <- createInternalProduct operator operator intMerchant1 "intMerchant1-001" "product003" "Premeium Life Insurance" 20100.00 [alice, bob, charlie] BRONZE
+--   -- product4Cid <- createInternalProduct operator operator intMerchant1 "intMerchant1-001" "product004" "Standard Life Insurance" 9000.00 [alice, bob, charlie] IRON
+
+--   -- product21Cid <- createInternalProduct operator operator intMerchant2 "intMerchant2-001" "product001" "Game of S.U.R.F" 2950.00 [alice, bob, charlie] GOLD
+--   -- product22Cid <- createInternalProduct operator operator intMerchant2 "intMerchant2-001" "product002" "Tokyo Olympic Games" 4900.00 [alice, bob, charlie] SILVER
+--   -- product23Cid <- createInternalProduct operator operator intMerchant2 "intMerchant2-001" "product003" "eSport Ticket" 20100.00 [alice, bob, charlie] BRONZE
+
+
+
+--   -- --Customer Internal Merchant Purchase
+--   -- submit alice do exerciseCmd product1Cid Purchase with customer = alice, quantity = 1.0 , customerDepositCid = customer1BankDepositCid, customerSettlementCid= customer1SettlementCid
+--   -- submit bob do exerciseCmd product2Cid Purchase with customer = bob, quantity = 1.0 , customerDepositCid = customer2BankDepositCid, customerSettlementCid= customer2SettlementCid
+
+--   pure()
+
+-- extOnboarding : Parties  -> Script ()
+-- extOnboarding Parties{..}  = do
+--   onboardExtMerchant operator operator extMerchant1 extmerchant1AccountId [alice, bob, charlie] 
+--   onboardExtMerchant operator operator extMerchant2 extmerchant2AccountId [alice, bob, charlie] 
+--   onboardExtMerchant operator operator extMerchant3 extmerchant3AccountId [alice, bob, charlie] 
+
+
+--   let 
+--     gold = ExternalMerchant.RewardRule with category= (ExternalMerchant.GOLD ) ; limit =10000.00; discount = 0.3
+--     silver = ExternalMerchant.RewardRule with category= (ExternalMerchant.SILVER ) ; limit =50000.00; discount = 0.2
+--     bronze = ExternalMerchant.RewardRule with category= (ExternalMerchant.BRONZE ) ; limit =40000.00; discount = 0.1
+--     iron = ExternalMerchant.RewardRule with category= (ExternalMerchant.IRON) ; limit =5000.00; discount = 0.05
+  
+--   --External Reward Rule
+--   -- createRewardRule operator operator extMerchant1 "extMerchant1-001" [alice, bob, charlie] [gold, silver, bronze, iron] 
+
+--   -- --External Product List
+--   -- product1Cid <- createExternalProduct operator operator extMerchant1 "extMerchant1-001" "product001" "Mocha Latte" 2000.00 [alice, bob, charlie] (ExternalMerchant.GOLD )
+--   -- product2Cid <- createExternalProduct operator operator extMerchant1 "extMerchant1-001" "product002" "Americano" 1000.00 [alice, bob, charlie] (ExternalMerchant.SILVER )
+--   -- product3Cid <- createExternalProduct operator operator extMerchant1 "extMerchant1-001" "product003" "Cheese Cake" 3000.00 [alice, bob, charlie] (ExternalMerchant.BRONZE)
+--   -- product4Cid <- createExternalProduct operator operator extMerchant1 "extMerchant1-001" "product004" "Chicken Sandwitch" 4000.00 [alice, bob, charlie] (ExternalMerchant.IRON )
+
+--   -- --Customer External Merchant Purchase
+--   -- createExternalPurchase operator alice product1Cid 1.0
+--   -- createExternalPurchase operator alice product1Cid 4.0
+--   -- createExternalPurchase operator alice product2Cid 10.0
+--   -- createExternalPurchase operator alice product2Cid 40.0 
+
+
+
+--   pure()

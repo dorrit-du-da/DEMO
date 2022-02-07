@@ -1,0 +1,89 @@
+module SmartCash.InternalMerchant.Service where
+
+import SmartCash.InternalMerchant.Model qualified as InternalMerchant
+import DA.Next.Set
+import DA.Finance.Types
+import SmartCash.Rule.Service qualified as Rule
+
+createOrLookup : forall t k. (Template t, TemplateKey t k) => t -> Update (ContractId t)
+createOrLookup t = lookupByKey @t (key t) >>= \case
+    (Some cid) -> return cid
+    None       -> create t
+
+template Service
+  with
+    operator : Party
+    provider : Party
+    customer : Party
+    accountId: Id
+    observers: Set Party
+  where
+    signatory operator, provider, customer
+    observer observers
+
+    key (operator, provider, customer) : (Party, Party, Party)
+    maintainer key._1
+
+    controller customer can
+
+      nonconsuming CreateProduct: ContractId InternalMerchant.Product 
+        with
+          ruleIds: [Text]
+          productId: Text
+          item: Text
+          unitPrice: Decimal
+          condition: InternalMerchant.Condition
+        do
+          create InternalMerchant.Product with provider = customer, ..
+
+
+
+template Offer
+  with
+    operator : Party
+    provider : Party
+    customer : Party
+  where
+    signatory operator, provider
+
+    controller customer can
+      Accept : ContractId Service
+        with
+          accountId: Id
+          observers: [Party]
+        do
+          createOrLookup Rule.Service with provider = customer , observers = fromList observers, ..
+          createOrLookup Service with observers = fromList observers, ..
+
+      Decline : ()
+        do
+          return ()
+
+    controller provider can
+      Withdraw : ()
+        do pure ()
+
+template Request
+  with
+    provider : Party
+    customer : Party
+  where
+    signatory customer
+    observer provider
+
+    controller customer can
+      Cancel : ()
+        do pure ()
+
+    controller provider can
+      Reject : ()
+        do pure ()
+
+    choice Approve : ContractId Service
+      with
+        operator : Party
+        accountId: Id
+        observers: [Party]
+      controller operator, provider
+      do
+        createOrLookup Service with observers = fromList observers, ..

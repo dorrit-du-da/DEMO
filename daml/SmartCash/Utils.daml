@@ -1,0 +1,60 @@
+module SmartCash.Utils where
+
+import SmartCash.Operator.Role qualified as Operator
+import SmartCash.ExternalMerchant.Service qualified as ExternalMerchant
+import SmartCash.ExternalMerchant.Model qualified as ExternalMerchant
+import SmartCash.InternalMerchant.Service qualified as InternalMerchant
+import SmartCash.InternalMerchant.Model qualified as InternalMerchant
+import SmartCash.Rule.Model qualified as Rule
+import SmartCash.Rule.Service qualified as Rule
+import DA.Finance.Asset
+import DA.Finance.Asset.Settlement
+import Daml.Script
+import DA.Finance.Types
+import DA.List (head)
+
+onboardIntMerchant : Party -> Party -> Party -> Id -> [Party]-> Script (ContractId InternalMerchant.Service)
+onboardIntMerchant operator provider customer accountId observers = do
+  offerCid <- submit operator do exerciseByKeyCmd @Operator.Role operator Operator.OfferInternalMerchantService with ..
+  submit customer do exerciseCmd offerCid InternalMerchant.Accept with ..
+
+onboardExtMerchant : Party -> Party -> Party -> Id -> [Party] -> Script (ContractId ExternalMerchant.Service)
+onboardExtMerchant operator provider customer accountId observers= do
+  offerCid <- submit operator do exerciseByKeyCmd @Operator.Role operator Operator.OfferExternalMerchantService with ..
+  submit customer do exerciseCmd offerCid ExternalMerchant.Accept with ..
+
+-- createSpendingRule:  Party -> Party -> Party -> Text -> [Party] -> [InternalMerchant.SpendingPower] -> Script (ContractId InternalMerchant.Rule)
+-- createSpendingRule operator provider customer ruleId observers spendingPower = do
+--   submit customer do exerciseByKeyCmd @InternalMerchant.Service (operator, provider, customer) InternalMerchant.CreateRule with  ..
+
+createInternalProduct: Party -> Party -> Party -> [Text] -> Text -> Text -> Decimal -> [Party] -> InternalMerchant.Condition -> Script (ContractId InternalMerchant.Product)
+createInternalProduct operator provider customer ruleIds productId item unitPrice observers condition =do
+  submit customer do exerciseByKeyCmd @InternalMerchant.Service (operator, provider, customer) InternalMerchant.CreateProduct with  ..
+
+-- createRewardRule:  Party -> Party -> Party -> Text -> [Party] -> [ExternalMerchant.RewardRule] -> Script (ContractId ExternalMerchant.Rule)
+-- createRewardRule operator provider customer ruleId observers rewardRule = do
+--   submit customer do exerciseByKeyCmd @ExternalMerchant.Service (operator, provider, customer) ExternalMerchant.CreateRule with  ..
+
+createExternalProduct: Party -> Party -> Party -> [Text] -> Text -> Text -> Decimal -> [Party] -> ExternalMerchant.Condition  -> Script (ContractId ExternalMerchant.Product)
+createExternalProduct operator provider customer ruleIds productId item unitPrice observers condition =do
+  submit customer do exerciseByKeyCmd @ExternalMerchant.Service (operator, provider, customer) ExternalMerchant.CreateProduct with  ..
+
+createExternalPurchase: Party -> Party -> ContractId ExternalMerchant.Product -> Decimal -> Date -> Int -> Script()
+createExternalPurchase provider customer productCid quantity date time= do
+  ( customerDepositCid, _ ) <- head <$> queryFilter @AssetDeposit customer (\si -> si.account.owner == customer && si.account.provider == provider)
+  ( customerSettlementCid, _ ) <- head <$> queryFilter @AssetSettlementRule customer (\si -> si.account.provider == provider && si.account.owner == customer)
+  submit customer do exerciseCmd productCid ExternalMerchant.Purchase with ..
+
+createRule: Party -> Party -> Text -> Rule.RewardRule -> Optional Date -> Optional Date -> Optional Decimal  -> Optional Int  -> Optional Int -> Optional [Rule.MembershipDetail] -> Script (ContractId Rule.Rule)
+createRule operator provider ruleId rewardRule startDate endDate quantity startTime endTime membershipDetail =do
+  submit provider do exerciseByKeyCmd @Rule.Service (operator, provider) Rule.CreateRule with ..
+
+createInternalPurchase: Party -> Party -> ContractId InternalMerchant.Product -> Decimal -> Date -> Int -> Script()
+createInternalPurchase provider customer productCid quantity date time= do
+  ( customerDepositCid, _ ) <- head <$> queryFilter @AssetDeposit customer (\si -> si.account.owner == customer && si.account.provider == provider)
+  ( customerSettlementCid, _ ) <- head <$> queryFilter @AssetSettlementRule customer (\si -> si.account.provider == provider && si.account.owner ==customer)
+  submit customer do exerciseCmd productCid InternalMerchant.Purchase with ..
+
+
+
+
