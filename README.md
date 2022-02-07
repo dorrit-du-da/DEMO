@@ -8,7 +8,7 @@ To start the daml backend + daml sandbox
 run "daml start" in the Terminal
 
 To start the UI frontend
-1. run npm install for first time
+1. run "npm install" for first time
 2. run "npm start" in the seperate Terminal
 
 # Parties in ledger
